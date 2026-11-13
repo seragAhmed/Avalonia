@@ -812,5 +812,112 @@ namespace Avalonia.Base.UnitTests.Input
 
             Assert.True(raised);
         }
+
+        [Fact]
+        public void Scroll_Inertia_Should_Advance_On_Animation_Frame_Without_Running_Input_Jobs()
+        {
+            var (border, root) = CreateScrollGestureTarget();
+            var inertiaDeltas = new List<Vector>();
+            var inertiaStarted = false;
+
+            root.AddHandler(InputElement.ScrollGestureInertiaStartingEvent, (_, _) => inertiaStarted = true);
+            root.AddHandler(InputElement.ScrollGestureEvent, (_, e) =>
+            {
+                if (inertiaStarted)
+                    inertiaDeltas.Add(e.Delta);
+                e.Handled = true;
+            });
+
+            Fling(border);
+            Assert.True(inertiaStarted);
+
+            // Android only runs Input priority jobs while its Looper is idle, so a frame must not depend on them.
+            Dispatcher.UIThread.RunJobs(DispatcherPriority.Render);
+
+            var delta = Assert.Single(inertiaDeltas);
+            Assert.True(delta.Y > 0);
+            Assert.Equal(0, delta.X);
+        }
+
+        [Fact]
+        public void Scroll_Inertia_Should_Stop_When_New_Touch_Starts()
+        {
+            var (border, root) = CreateScrollGestureTarget();
+            var inertiaStarted = false;
+            var inertiaEvents = 0;
+            var ended = 0;
+
+            root.AddHandler(InputElement.ScrollGestureInertiaStartingEvent, (_, _) => inertiaStarted = true);
+            root.AddHandler(InputElement.ScrollGestureEndedEvent, (_, _) => ended++);
+            root.AddHandler(InputElement.ScrollGestureEvent, (_, e) =>
+            {
+                if (inertiaStarted)
+                    inertiaEvents++;
+                e.Handled = true;
+            });
+
+            Fling(border);
+            Assert.True(inertiaStarted);
+
+            new TouchTestHelper().Down(border, position: new Point(50, 50));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(1, ended);
+            Assert.Equal(0, inertiaEvents);
+        }
+
+        [Fact]
+        public void Scroll_Inertia_Should_End_When_Handler_Requests_It()
+        {
+            var (border, root) = CreateScrollGestureTarget();
+            var inertiaStarted = false;
+            var inertiaEvents = 0;
+            var ended = 0;
+
+            root.AddHandler(InputElement.ScrollGestureInertiaStartingEvent, (_, _) => inertiaStarted = true);
+            root.AddHandler(InputElement.ScrollGestureEndedEvent, (_, _) => ended++);
+            root.AddHandler(InputElement.ScrollGestureEvent, (_, e) =>
+            {
+                e.Handled = true;
+                if (inertiaStarted)
+                {
+                    inertiaEvents++;
+                    // ScrollContentPresenter does this when the offset is clamped at the content boundary.
+                    e.ShouldEndScrollGesture = true;
+                }
+            });
+
+            Fling(border);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(1, inertiaEvents);
+            Assert.Equal(1, ended);
+        }
+
+        private static (Border border, TestRoot root) CreateScrollGestureTarget()
+        {
+            var border = new Border
+            {
+                Width = 100,
+                Height = 100,
+                Background = new SolidColorBrush(Colors.Red)
+            };
+            border.GestureRecognizers.Add(new ScrollGestureRecognizer
+            {
+                CanVerticallyScroll = true,
+                IsScrollInertiaEnabled = true,
+                ScrollStartDistance = 0
+            });
+            return (border, new TestRoot { Child = border });
+        }
+
+        private static void Fling(Border border)
+        {
+            var touch = new TouchTestHelper();
+            touch.Down(border, position: new Point(50, 90));
+            for (var y = 80; y >= 10; y -= 10)
+                touch.Move(border, position: new Point(50, y));
+            touch.Up(border, position: new Point(50, 10));
+        }
     }
 }
