@@ -136,7 +136,8 @@ internal abstract class BclStorageProvider : IStorageProvider
 
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
-            return "~/Downloads";
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return string.IsNullOrEmpty(home) ? null : Path.Combine(home, "Downloads");
         }
 
         return null;
